@@ -239,6 +239,30 @@ What it deliberately does not do:
 - **Records must be UTF-8.** A line that is not is counted as invalid and
   reported with the byte offset where decoding failed.
 
+## Performance
+
+Numbers from an Apple M-series laptop, on a 357 MiB file with 800,000 records
+(warm page cache, `--release` build):
+
+| Command | Wall time | Throughput |
+| --- | --- | --- |
+| `stats` | 0.60 s | ~600 MB/s |
+| `schema --depth 3` | 0.99 s | ~360 MB/s |
+| `sample -n 100` | 0.05 s | ~7 GB/s |
+
+`sample` and `head` never parse JSON, so they run at the speed of the line
+splitter; `stats` pays for one full parse per record and `schema` additionally
+walks every nested path. Resident memory stays flat at a few megabytes in all
+three cases - it is dominated by the read buffer (256 KiB) and by whatever the
+capped tables hold, not by the size of the input.
+
+If you only need the broken-line report on a very large shard, `stats
+--max-errors 1` still has to read everything, but you can stop early yourself:
+
+```sh
+head -c 100000000 shard.jsonl | jsonl-peek stats -
+```
+
 ## Test
 
 ```sh
