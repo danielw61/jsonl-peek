@@ -335,6 +335,13 @@ impl Stats {
                     value
                 ));
             }
+            if stat.distinct_dropped > 0 {
+                out.push_str(&format!(
+                    "  ... {} more distinct values not tracked (limit {})\n",
+                    thousands(stat.distinct_dropped),
+                    self.options.max_distinct
+                ));
+            }
         }
 
         if !self.issues.is_empty() {
@@ -410,6 +417,11 @@ impl Stats {
             out.push_str(&format!(
                 ",\"records_matched\":{},\"records_missing\":{},\"values\":{}",
                 stat.records_matched, stat.records_missing, stat.values
+            ));
+            out.push_str(&format!(
+                ",\"distinct\":{},\"distinct_dropped\":{}",
+                stat.distinct.len() as u64 + stat.distinct_dropped,
+                stat.distinct_dropped
             ));
             out.push_str(",\"types\":");
             write_counts(&stat.types, &mut out);
@@ -618,6 +630,37 @@ mod tests {
         assert_eq!(field.records_missing, 1);
         assert_eq!(field.values, 3);
         assert_eq!(field.top(5), vec![("\"user\"", 2), ("\"system\"", 1)]);
+    }
+
+    #[test]
+    fn caps_the_field_distinct_value_table() {
+        let mut input = String::new();
+        for i in 0..50 {
+            input.push_str("{\"v\":");
+            input.push_str(&i.to_string());
+            input.push_str("}\n");
+        }
+        let options = StatsOptions {
+            fields: vec![FieldPath::parse("v").unwrap()],
+            max_distinct: 10,
+            ..StatsOptions::default()
+        };
+        let s = Stats::from_reader(input.as_bytes(), options).unwrap();
+        let field = &s.fields[0];
+        assert_eq!(field.distinct.len(), 10);
+        assert_eq!(field.distinct_dropped, 40);
+
+        let report = s.report_text("x", 5);
+        assert!(report.contains("50 distinct values"));
+        assert!(report.contains("... 40 more distinct values not tracked (limit 10)"));
+
+        let json = parse(&s.report_json("x")).expect("report must be valid JSON");
+        let field_json = &json.get("fields").and_then(Value::as_array).unwrap()[0];
+        assert_eq!(field_json.get("distinct").and_then(Value::as_i64), Some(50));
+        assert_eq!(
+            field_json.get("distinct_dropped").and_then(Value::as_i64),
+            Some(40)
+        );
     }
 
     #[test]
