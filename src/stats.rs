@@ -406,6 +406,8 @@ impl Stats {
             out.push('}');
         }
         out.push('}');
+        out.push_str(",\"keys_dropped\":");
+        out.push_str(&self.keys_dropped.to_string());
 
         out.push_str(",\"fields\":[");
         for (i, stat) in self.fields.iter().enumerate() {
@@ -679,6 +681,9 @@ mod tests {
         assert_eq!(s.keys.len(), 10);
         assert_eq!(s.keys_dropped, 40);
         assert!(s.report_text("x", 5).contains("not tracked"));
+
+        let json = parse(&s.report_json("x")).expect("report must be valid JSON");
+        assert_eq!(json.get("keys_dropped").and_then(Value::as_i64), Some(40));
     }
 
     #[test]
