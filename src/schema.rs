@@ -72,6 +72,8 @@ pub struct Schema {
     pub paths: BTreeMap<String, PathStat>,
     /// True when [`SchemaOptions::max_paths`] stopped new paths being tracked.
     pub truncated: bool,
+    /// Lines that could not be parsed as JSON, so were never observed.
+    pub skipped: u64,
     seen: HashSet<String>,
     buffer: String,
 }
@@ -84,6 +86,7 @@ impl Schema {
             documents: 0,
             paths: BTreeMap::new(),
             truncated: false,
+            skipped: 0,
             seen: HashSet::new(),
             buffer: String::new(),
         }
@@ -97,6 +100,12 @@ impl Schema {
         prefix.clear();
         self.walk(&mut prefix, value, 0);
         self.buffer = prefix;
+    }
+
+    /// Records a line that failed to parse, so it counts toward `skipped`
+    /// without contributing any path.
+    pub fn observe_invalid(&mut self) {
+        self.skipped += 1;
     }
 
     fn walk(&mut self, prefix: &mut String, value: &Value, depth: usize) {
@@ -191,6 +200,9 @@ impl Schema {
         if self.truncated {
             out.push_str("  ... path limit reached, output is incomplete\n");
         }
+        if self.skipped > 0 {
+            out.push_str(&format!("\n{} unparseable lines skipped\n", self.skipped));
+        }
         out
     }
 
@@ -202,6 +214,8 @@ impl Schema {
         out.push_str(&self.documents.to_string());
         out.push_str(",\"truncated\":");
         out.push_str(if self.truncated { "true" } else { "false" });
+        out.push_str(",\"skipped\":");
+        out.push_str(&self.skipped.to_string());
         out.push_str(",\"paths\":");
         out.push('{');
         for (i, (path, stat)) in self.filtered(min_rate).into_iter().enumerate() {
@@ -333,6 +347,21 @@ mod tests {
                 .and_then(Value::as_i64),
             Some(3)
         );
+    }
+
+    #[test]
+    fn observe_invalid_is_reported_in_both_formats() {
+        let mut s = Schema::new(SchemaOptions::default());
+        s.observe(&parse(r#"{"a":1}"#).unwrap());
+        s.observe_invalid();
+        s.observe_invalid();
+        assert_eq!(s.skipped, 2);
+        assert_eq!(s.documents, 1);
+
+        assert!(s.report_text(0.0).contains("2 unparseable lines skipped"));
+
+        let json = parse(&s.report_json(0.0)).expect("schema report must be valid JSON");
+        assert_eq!(json.get("skipped").and_then(Value::as_i64), Some(2));
     }
 
     #[test]

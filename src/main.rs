@@ -289,26 +289,22 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
     let path = file.unwrap_or_else(|| "-".to_string());
     let mut reader = LineReader::new(open(&path)?);
     let mut schema = Schema::new(options);
-    let mut skipped = 0u64;
     while let Some(line) = reader.next_line()? {
         if line.is_blank() {
             continue;
         }
         match std::str::from_utf8(line.bytes).ok().map(jsonl_peek::parse) {
             Some(Ok(value)) => schema.observe(&value),
-            _ => skipped += 1,
+            _ => schema.observe_invalid(),
         }
     }
 
-    let mut report = if as_json {
+    let report = if as_json {
         let mut text = schema.report_json(min_rate);
         text.push('\n');
         text
     } else {
         schema.report_text(min_rate)
     };
-    if skipped > 0 && !as_json {
-        report.push_str(&format!("\n{} unparseable lines skipped\n", skipped));
-    }
     emit(&report)
 }

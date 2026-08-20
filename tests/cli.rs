@@ -162,6 +162,17 @@ fn schema_infers_nested_paths() {
 }
 
 #[test]
+fn schema_json_reports_skipped_lines() {
+    let fixture = Fixture::new("schemajson", FIXTURE);
+    let out = run(&["schema", "--json", fixture.path().to_str().unwrap()]);
+    assert!(out.status.success());
+    let report = parse(&stdout_of(&out)).expect("--json output must be valid JSON");
+
+    assert_eq!(report.get("records").and_then(Value::as_i64), Some(6));
+    assert_eq!(report.get("skipped").and_then(Value::as_i64), Some(1));
+}
+
+#[test]
 fn schema_min_rate_hides_rare_paths() {
     let fixture = Fixture::new("minrate", FIXTURE);
     let path = fixture.path().to_str().unwrap();
