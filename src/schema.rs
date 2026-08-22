@@ -72,6 +72,8 @@ pub struct Schema {
     pub paths: BTreeMap<String, PathStat>,
     /// True when [`SchemaOptions::max_paths`] stopped new paths being tracked.
     pub truncated: bool,
+    /// Path occurrences dropped because the path table was full.
+    pub paths_dropped: u64,
     /// Lines that could not be parsed as JSON, so were never observed.
     pub skipped: u64,
     seen: HashSet<String>,
@@ -86,6 +88,7 @@ impl Schema {
             documents: 0,
             paths: BTreeMap::new(),
             truncated: false,
+            paths_dropped: 0,
             skipped: 0,
             seen: HashSet::new(),
             buffer: String::new(),
@@ -156,6 +159,7 @@ impl Schema {
             self.paths.insert(path.to_string(), stat);
         } else {
             self.truncated = true;
+            self.paths_dropped += 1;
             return;
         }
         if fresh_document {
@@ -197,8 +201,11 @@ impl Schema {
                 .join(" ");
             out.push_str(&format!("  {:<38} {:>6.1}%  {}\n", path, rate, types));
         }
-        if self.truncated {
-            out.push_str("  ... path limit reached, output is incomplete\n");
+        if self.paths_dropped > 0 {
+            out.push_str(&format!(
+                "  ... {} more path occurrences not tracked (limit {}), output is incomplete\n",
+                self.paths_dropped, self.options.max_paths
+            ));
         }
         if self.skipped > 0 {
             out.push_str(&format!("\n{} unparseable lines skipped\n", self.skipped));
@@ -214,6 +221,8 @@ impl Schema {
         out.push_str(&self.documents.to_string());
         out.push_str(",\"truncated\":");
         out.push_str(if self.truncated { "true" } else { "false" });
+        out.push_str(",\"paths_dropped\":");
+        out.push_str(&self.paths_dropped.to_string());
         out.push_str(",\"skipped\":");
         out.push_str(&self.skipped.to_string());
         out.push_str(",\"paths\":");
@@ -310,7 +319,19 @@ mod tests {
         );
         assert_eq!(s.paths.len(), 2);
         assert!(s.truncated);
-        assert!(s.report_text(0.0).contains("path limit reached"));
+        assert!(s.paths_dropped > 0);
+
+        let report = s.report_text(0.0);
+        assert!(report.contains(&format!(
+            "{} more path occurrences not tracked (limit 2)",
+            s.paths_dropped
+        )));
+
+        let json = parse(&s.report_json(0.0)).expect("schema report must be valid JSON");
+        assert_eq!(
+            json.get("paths_dropped").and_then(Value::as_i64),
+            Some(s.paths_dropped as i64)
+        );
     }
 
     #[test]
