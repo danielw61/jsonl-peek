@@ -102,6 +102,22 @@ fn stats_json_is_machine_readable() {
 }
 
 #[test]
+fn stats_min_count_hides_rare_field_values() {
+    let fixture = Fixture::new("mincount", FIXTURE);
+    let path = fixture.path().to_str().unwrap();
+    // meta.src is "web" 3 times and "forum" twice across the 6 valid records.
+    let all = stdout_of(&run(&["stats", "--field", "meta.src", path]));
+    assert!(all.contains("\"web\""));
+    assert!(all.contains("\"forum\""));
+
+    let common = stdout_of(&run(&[
+        "stats", "--field", "meta.src", "--min-count", "3", path,
+    ]));
+    assert!(common.contains("\"web\""), "report:\n{}", common);
+    assert!(!common.contains("\"forum\""), "report:\n{}", common);
+}
+
+#[test]
 fn head_prints_the_first_lines() {
     let fixture = Fixture::new("head", FIXTURE);
     let out = run(&["head", "-n", "2", fixture.path().to_str().unwrap()]);

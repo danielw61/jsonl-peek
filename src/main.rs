@@ -78,7 +78,7 @@ fn print_usage() {
 usage:
   {prog} head   [-n N] [FILE]
   {prog} sample [-n N] [--seed S] [FILE]
-  {prog} stats  [--field PATH]... [--top N] [--max-errors N] [--json] [FILE]
+  {prog} stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [FILE]
   {prog} schema [--depth N] [--min-rate R] [--json] [FILE]
 
 FILE defaults to '-', meaning standard input. Every command reads the input
@@ -99,6 +99,7 @@ options:
   --field PATH    profile a field, e.g. 'meta.source' or 'messages[].role'
                   (repeatable)
   --top N         how many distinct values to list per field (default 10)
+  --min-count N   hide field values that occur fewer than N times (default 0)
   --max-errors N  how many broken lines to show (default 10)
   --depth N       how deep to infer the schema (default 3)
   --min-rate R    hide schema paths present in fewer than R of the records,
@@ -229,6 +230,7 @@ fn cmd_stats(args: &[String]) -> Result<(), Fail> {
     let mut options = StatsOptions::default();
     let mut as_json = false;
     let mut top = 10usize;
+    let mut min_count = 0u64;
     let mut file: Option<String> = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -240,6 +242,9 @@ fn cmd_stats(args: &[String]) -> Result<(), Fail> {
                 options.fields.push(path);
             }
             "--top" => top = parse_number(need_value(iter.next(), "--top")?, "--top")?,
+            "--min-count" => {
+                min_count = parse_number(need_value(iter.next(), "--min-count")?, "--min-count")?;
+            }
             "--max-errors" => {
                 options.max_issues =
                     parse_number(need_value(iter.next(), "--max-errors")?, "--max-errors")?;
@@ -253,11 +258,11 @@ fn cmd_stats(args: &[String]) -> Result<(), Fail> {
     let path = file.unwrap_or_else(|| "-".to_string());
     let stats = Stats::from_reader(open(&path)?, options)?;
     let report = if as_json {
-        let mut text = stats.report_json(&path);
+        let mut text = stats.report_json(&path, min_count);
         text.push('\n');
         text
     } else {
-        stats.report_text(&path, top)
+        stats.report_text(&path, top, min_count)
     };
     emit(&report)
 }

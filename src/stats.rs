@@ -62,9 +62,16 @@ pub struct FieldStat {
 impl FieldStat {
     /// The `n` most frequent values, most frequent first.
     pub fn top(&self, n: usize) -> Vec<(&str, u64)> {
+        self.top_min(n, 0)
+    }
+
+    /// The `n` most frequent values with at least `min_count` occurrences,
+    /// most frequent first.
+    pub fn top_min(&self, n: usize, min_count: u64) -> Vec<(&str, u64)> {
         let mut rows: Vec<(&str, u64)> = self
             .distinct
             .iter()
+            .filter(|(_, count)| **count >= min_count)
             .map(|(k, v)| (k.as_str(), *v))
             .collect();
         rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
@@ -253,8 +260,10 @@ impl Stats {
         }
     }
 
-    /// Renders the human readable report printed by `stats`.
-    pub fn report_text(&self, source: &str, top_values: usize) -> String {
+    /// Renders the human readable report printed by `stats`. `min_count`
+    /// hides values from the per-field table that occur fewer times than
+    /// that; it does not affect the distinct value count itself.
+    pub fn report_text(&self, source: &str, top_values: usize, min_count: u64) -> String {
         let mut out = String::new();
         out.push_str("file    ");
         out.push_str(source);
@@ -327,7 +336,7 @@ impl Stats {
             ));
             let distinct = stat.distinct.len() as u64 + stat.distinct_dropped;
             out.push_str(&format!("  {} distinct values\n", thousands(distinct)));
-            for (value, count) in stat.top(top_values) {
+            for (value, count) in stat.top_min(top_values, min_count) {
                 out.push_str(&format!(
                     "    {:>10}  {:>6}  {}\n",
                     thousands(count),
@@ -360,8 +369,9 @@ impl Stats {
         out
     }
 
-    /// Renders the same report as a single JSON object.
-    pub fn report_json(&self, source: &str) -> String {
+    /// Renders the same report as a single JSON object. `min_count` hides
+    /// values from each field's `top` list that occur fewer times than that.
+    pub fn report_json(&self, source: &str, min_count: u64) -> String {
         let mut out = String::new();
         out.push('{');
         out.push_str("\"file\":");
@@ -428,7 +438,7 @@ impl Stats {
             out.push_str(",\"types\":");
             write_counts(&stat.types, &mut out);
             out.push_str(",\"top\":[");
-            for (j, (value, count)) in stat.top(20).into_iter().enumerate() {
+            for (j, (value, count)) in stat.top_min(20, min_count).into_iter().enumerate() {
                 if j > 0 {
                     out.push(',');
                 }
@@ -635,6 +645,30 @@ mod tests {
     }
 
     #[test]
+    fn top_min_hides_low_frequency_values() {
+        let s = stats_for(SAMPLE, &["role"]);
+        let field = &s.fields[0];
+        // "user" appears in 2 of the 3 valid objects, "assistant" in 1.
+        assert_eq!(field.top(5), vec![("\"user\"", 2), ("\"assistant\"", 1)]);
+        assert_eq!(field.top_min(5, 2), vec![("\"user\"", 2)]);
+        assert_eq!(field.top_min(5, 3), Vec::<(&str, u64)>::new());
+
+        let report = s.report_text("x", 5, 2);
+        assert!(report.contains("\"user\""));
+        assert!(!report.contains("\"assistant\""));
+
+        let json = parse(&s.report_json("x", 2)).expect("report must be valid JSON");
+        let top = json
+            .get("fields")
+            .and_then(Value::as_array)
+            .unwrap()[0]
+            .get("top")
+            .and_then(Value::as_array)
+            .unwrap();
+        assert_eq!(top.len(), 1);
+    }
+
+    #[test]
     fn caps_the_field_distinct_value_table() {
         let mut input = String::new();
         for i in 0..50 {
@@ -652,11 +686,11 @@ mod tests {
         assert_eq!(field.distinct.len(), 10);
         assert_eq!(field.distinct_dropped, 40);
 
-        let report = s.report_text("x", 5);
+        let report = s.report_text("x", 5, 0);
         assert!(report.contains("50 distinct values"));
         assert!(report.contains("... 40 more distinct values not tracked (limit 10)"));
 
-        let json = parse(&s.report_json("x")).expect("report must be valid JSON");
+        let json = parse(&s.report_json("x", 0)).expect("report must be valid JSON");
         let field_json = &json.get("fields").and_then(Value::as_array).unwrap()[0];
         assert_eq!(field_json.get("distinct").and_then(Value::as_i64), Some(50));
         assert_eq!(
@@ -680,9 +714,9 @@ mod tests {
         let s = Stats::from_reader(input.as_bytes(), options).unwrap();
         assert_eq!(s.keys.len(), 10);
         assert_eq!(s.keys_dropped, 40);
-        assert!(s.report_text("x", 5).contains("not tracked"));
+        assert!(s.report_text("x", 5, 0).contains("not tracked"));
 
-        let json = parse(&s.report_json("x")).expect("report must be valid JSON");
+        let json = parse(&s.report_json("x", 0)).expect("report must be valid JSON");
         assert_eq!(json.get("keys_dropped").and_then(Value::as_i64), Some(40));
     }
 
@@ -710,7 +744,7 @@ mod tests {
     #[test]
     fn text_report_is_readable() {
         let s = stats_for(SAMPLE, &["meta.src"]);
-        let report = s.report_text("sample.jsonl", 5);
+        let report = s.report_text("sample.jsonl", 5, 0);
         assert!(report.contains("file    sample.jsonl"));
         assert!(report.contains("top level keys over 3 objects"));
         assert!(report.contains("field meta.src"));
@@ -720,7 +754,7 @@ mod tests {
     #[test]
     fn json_report_parses_back() {
         let s = stats_for(SAMPLE, &["meta.src"]);
-        let report = s.report_json("sample.jsonl");
+        let report = s.report_json("sample.jsonl", 0);
         let parsed = parse(&report).expect("report must be valid JSON");
         assert_eq!(parsed.get("lines").and_then(Value::as_i64), Some(6));
         assert_eq!(parsed.get("valid").and_then(Value::as_i64), Some(4));
@@ -745,10 +779,10 @@ mod tests {
     fn empty_input_reports_cleanly() {
         let s = stats_for("", &[]);
         assert_eq!(s.lines, 0);
-        let report = s.report_text("-", 5);
+        let report = s.report_text("-", 5, 0);
         assert!(report.contains("lines"));
         assert!(!report.contains("line length"));
-        assert!(parse(&s.report_json("-")).is_ok());
+        assert!(parse(&s.report_json("-", 0)).is_ok());
     }
 
     #[test]

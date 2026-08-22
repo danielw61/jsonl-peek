@@ -149,7 +149,7 @@ $ zstdcat shard-0000.jsonl.zst | jsonl-peek stats --json - | jq .line_length
 ```
 jsonl-peek head   [-n N] [FILE]
 jsonl-peek sample [-n N] [--seed S] [FILE]
-jsonl-peek stats  [--field PATH]... [--top N] [--max-errors N] [--json] [FILE]
+jsonl-peek stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [FILE]
 jsonl-peek schema [--depth N] [--min-rate R] [--json] [FILE]
 ```
 
@@ -159,6 +159,7 @@ jsonl-peek schema [--depth N] [--min-rate R] [--json] [FILE]
 | `--seed S` | sample | seed the sampler for a reproducible subset |
 | `--field PATH` | stats | profile a field; repeatable |
 | `--top N` | stats | distinct values listed per field (default 10) |
+| `--min-count N` | stats | hide field values seen fewer than N times (default 0) |
 | `--max-errors N` | stats | broken lines shown (default 10) |
 | `--depth N` | schema | levels to descend (default 3) |
 | `--min-rate R` | schema | hide paths present in fewer than R of the records |

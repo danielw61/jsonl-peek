@@ -36,7 +36,7 @@ fn column_starts(lines: &[&str]) -> Vec<Vec<usize>> {
 
 #[test]
 fn key_table_columns_line_up() {
-    let report = stats().report_text("records.jsonl", 10);
+    let report = stats().report_text("records.jsonl", 10, 0);
     let lines: Vec<&str> = report.lines().collect();
     let header = lines
         .iter()
@@ -64,7 +64,7 @@ fn key_table_columns_line_up() {
 
 #[test]
 fn counts_in_the_report_match_the_data() {
-    let report = stats().report_text("records.jsonl", 10);
+    let report = stats().report_text("records.jsonl", 10, 0);
     assert!(report.contains("file    records.jsonl"), "{}", report);
     assert!(report.contains("blank 0   invalid 0   valid 4"), "{}", report);
     assert!(report.contains("top level keys over 4 objects"), "{}", report);
@@ -79,11 +79,11 @@ fn counts_in_the_report_match_the_data() {
 
 #[test]
 fn a_clean_file_has_no_error_section() {
-    let report = stats().report_text("records.jsonl", 10);
+    let report = stats().report_text("records.jsonl", 10, 0);
     assert!(!report.contains("invalid lines ("), "{}", report);
 
     let dirty = Stats::from_reader("{}\noops\n".as_bytes(), StatsOptions::default()).unwrap();
-    let report = dirty.report_text("dirty.jsonl", 10);
+    let report = dirty.report_text("dirty.jsonl", 10, 0);
     assert!(report.contains("invalid lines (1 total, showing 1)"), "{}", report);
     assert!(report.contains("line 2 col 1: unexpected 'o'"), "{}", report);
 }
@@ -110,7 +110,7 @@ fn schema_rates_are_per_document_not_per_occurrence() {
 #[test]
 fn percentages_never_divide_by_zero() {
     let empty = Stats::from_reader("".as_bytes(), StatsOptions::default()).unwrap();
-    let report = empty.report_text("empty.jsonl", 10);
+    let report = empty.report_text("empty.jsonl", 10, 0);
     assert!(!report.contains("NaN"), "{}", report);
     assert!(!report.contains("inf"), "{}", report);
 
