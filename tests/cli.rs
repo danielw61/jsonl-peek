@@ -118,6 +118,45 @@ fn stats_min_count_hides_rare_field_values() {
 }
 
 #[test]
+fn stats_progress_reports_to_stderr_and_leaves_stdout_untouched() {
+    let mut contents = String::new();
+    for i in 0..25_000 {
+        contents.push_str(&format!("{{\"i\":{}}}\n", i));
+    }
+    let fixture = Fixture::new("progress-stats", &contents);
+    let path = fixture.path().to_str().unwrap();
+
+    let quiet = run(&["stats", "--json", path]);
+    assert!(quiet.status.success());
+    assert!(quiet.stderr.is_empty(), "no --progress, no stderr chatter");
+
+    let loud = run(&["stats", "--json", "--progress", path]);
+    assert!(loud.status.success());
+    let stderr = String::from_utf8_lossy(&loud.stderr);
+    // 25,000 lines crosses the 10,000-line interval twice.
+    assert_eq!(stderr.lines().count(), 2, "stderr:\n{}", stderr);
+    assert!(stderr.contains("10000 lines"), "stderr:\n{}", stderr);
+    assert!(stderr.contains("20000 lines"), "stderr:\n{}", stderr);
+    assert_eq!(stdout_of(&loud), stdout_of(&quiet), "--progress must not change stdout");
+}
+
+#[test]
+fn schema_progress_reports_to_stderr() {
+    let mut contents = String::new();
+    for i in 0..15_000 {
+        contents.push_str(&format!("{{\"i\":{}}}\n", i));
+    }
+    let fixture = Fixture::new("progress-schema", &contents);
+    let path = fixture.path().to_str().unwrap();
+
+    let out = run(&["schema", "--progress", path]);
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(stderr.lines().count(), 1, "stderr:\n{}", stderr);
+    assert!(stderr.contains("10000 lines"), "stderr:\n{}", stderr);
+}
+
+#[test]
 fn head_prints_the_first_lines() {
     let fixture = Fixture::new("head", FIXTURE);
     let out = run(&["head", "-n", "2", fixture.path().to_str().unwrap()]);

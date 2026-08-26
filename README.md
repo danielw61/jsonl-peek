@@ -149,8 +149,8 @@ $ zstdcat shard-0000.jsonl.zst | jsonl-peek stats --json - | jq .line_length
 ```
 jsonl-peek head   [-n N] [FILE]
 jsonl-peek sample [-n N] [--seed S] [FILE]
-jsonl-peek stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [FILE]
-jsonl-peek schema [--depth N] [--min-rate R] [--json] [FILE]
+jsonl-peek stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [--progress] [FILE]
+jsonl-peek schema [--depth N] [--min-rate R] [--json] [--progress] [FILE]
 ```
 
 | Option | Commands | Meaning |
@@ -164,6 +164,7 @@ jsonl-peek schema [--depth N] [--min-rate R] [--json] [FILE]
 | `--depth N` | schema | levels to descend (default 3) |
 | `--min-rate R` | schema | hide paths present in fewer than R of the records |
 | `--json` | stats, schema | machine-readable output |
+| `--progress` | stats, schema | print a line count to stderr every 10,000 lines |
 
 Exit status is `0` on success, `1` on a runtime error (missing file, unreadable
 input) and `2` on a usage error.
@@ -263,6 +264,11 @@ If you only need the broken-line report on a very large shard, `stats
 ```sh
 head -c 100000000 shard.jsonl | jsonl-peek stats -
 ```
+
+If you do want to read the whole thing, `stats --progress` and `schema
+--progress` print a line count to stderr every 10,000 lines, so a run against
+a multi-gigabyte file is not silent. It only reads the line and byte counters
+`stats`/`schema` already keep, so it does not add to their memory footprint.
 
 ## Test
 

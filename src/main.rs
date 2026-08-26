@@ -15,6 +15,38 @@ const PROG: &str = "jsonl-peek";
 /// dominated by the parser rather than by syscalls.
 const READ_BUFFER: usize = 256 * 1024;
 
+/// Lines between `--progress` updates. `stats` and `schema` already track
+/// `lines_read`/`bytes_read` per line, so reporting on them costs nothing
+/// beyond the flag check itself and does not touch the single-pass,
+/// bounded-memory accumulators.
+const PROGRESS_INTERVAL: u64 = 10_000;
+
+/// Emits a periodic status line to stderr on a long run, so `stats` or
+/// `schema` on a multi-gigabyte file is not silent for minutes at a time.
+struct Progress {
+    every: u64,
+    next: u64,
+}
+
+impl Progress {
+    fn new(every: u64) -> Self {
+        Progress { every, next: every }
+    }
+
+    /// Reports once `lines` has crossed the next threshold. Threshold is
+    /// advanced past `lines` rather than by a fixed step, so a burst of many
+    /// lines between calls still reports just once.
+    fn tick(&mut self, lines: u64, bytes: u64) {
+        if lines < self.next {
+            return;
+        }
+        eprintln!("... {} lines, {} bytes read", lines, bytes);
+        while self.next <= lines {
+            self.next += self.every;
+        }
+    }
+}
+
 fn main() {
     let code = match run() {
         Ok(()) => 0,
@@ -78,8 +110,8 @@ fn print_usage() {
 usage:
   {prog} head   [-n N] [FILE]
   {prog} sample [-n N] [--seed S] [FILE]
-  {prog} stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [FILE]
-  {prog} schema [--depth N] [--min-rate R] [--json] [FILE]
+  {prog} stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [--progress] [FILE]
+  {prog} schema [--depth N] [--min-rate R] [--json] [--progress] [FILE]
 
 FILE defaults to '-', meaning standard input. Every command reads the input
 exactly once and keeps a bounded amount of state, so it is safe to point at a
@@ -105,12 +137,18 @@ options:
   --min-rate R    hide schema paths present in fewer than R of the records,
                   R between 0 and 1 (default 0)
   --json          machine readable output (stats, schema)
+  --progress      print a line count to stderr every {progress_interval}
+                  lines (stats, schema)
   -h, --help      this text
   -V, --version   version
 
 exit status: 0 success, 1 runtime error, 2 usage error
 ";
-    print!("{}", text.replace("{prog}", PROG));
+    print!(
+        "{}",
+        text.replace("{prog}", PROG)
+            .replace("{progress_interval}", &PROGRESS_INTERVAL.to_string())
+    );
 }
 
 fn open(path: &str) -> Result<Box<dyn BufRead>, Fail> {
@@ -231,6 +269,7 @@ fn cmd_stats(args: &[String]) -> Result<(), Fail> {
     let mut as_json = false;
     let mut top = 10usize;
     let mut min_count = 0u64;
+    let mut progress = false;
     let mut file: Option<String> = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -250,13 +289,22 @@ fn cmd_stats(args: &[String]) -> Result<(), Fail> {
                     parse_number(need_value(iter.next(), "--max-errors")?, "--max-errors")?;
             }
             "--json" => as_json = true,
+            "--progress" => progress = true,
             other if is_flag(other) => return Err(unknown_flag(other)),
             other => take_positional(&mut file, other)?,
         }
     }
 
     let path = file.unwrap_or_else(|| "-".to_string());
-    let stats = Stats::from_reader(open(&path)?, options)?;
+    let mut reader = LineReader::new(open(&path)?);
+    let mut stats = Stats::new(options);
+    let mut ticker = Progress::new(PROGRESS_INTERVAL);
+    while let Some(line) = reader.next_line()? {
+        stats.observe(&line);
+        if progress {
+            ticker.tick(reader.lines_read(), reader.bytes_read());
+        }
+    }
     let report = if as_json {
         let mut text = stats.report_json(&path, min_count);
         text.push('\n');
@@ -271,6 +319,7 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
     let mut options = SchemaOptions::default();
     let mut min_rate = 0.0f64;
     let mut as_json = false;
+    let mut progress = false;
     let mut file: Option<String> = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -283,6 +332,7 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
                 }
             }
             "--json" => as_json = true,
+            "--progress" => progress = true,
             other if is_flag(other) => return Err(unknown_flag(other)),
             other => take_positional(&mut file, other)?,
         }
@@ -294,6 +344,7 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
     let path = file.unwrap_or_else(|| "-".to_string());
     let mut reader = LineReader::new(open(&path)?);
     let mut schema = Schema::new(options);
+    let mut ticker = Progress::new(PROGRESS_INTERVAL);
     while let Some(line) = reader.next_line()? {
         if line.is_blank() {
             continue;
@@ -301,6 +352,9 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
         match std::str::from_utf8(line.bytes).ok().map(jsonl_peek::parse) {
             Some(Ok(value)) => schema.observe(&value),
             _ => schema.observe_invalid(),
+        }
+        if progress {
+            ticker.tick(reader.lines_read(), reader.bytes_read());
         }
     }
 
@@ -312,4 +366,34 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
         schema.report_text(min_rate)
     };
     emit(&report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Progress;
+
+    #[test]
+    fn reports_once_per_interval() {
+        let mut ticker = Progress::new(10);
+        let mut fired_at = Vec::new();
+        for lines in 1..=25u64 {
+            let next_before = ticker.next;
+            ticker.tick(lines, 0);
+            if ticker.next != next_before {
+                fired_at.push(lines);
+            }
+        }
+        assert_eq!(fired_at, vec![10, 20]);
+    }
+
+    #[test]
+    fn a_burst_past_several_intervals_reports_once() {
+        let mut ticker = Progress::new(10);
+        let next_before = ticker.next;
+        ticker.tick(45, 0);
+        assert_ne!(ticker.next, next_before);
+        assert!(ticker.next > 45);
+        // The threshold caught up in one jump, not several small ones.
+        assert_eq!(ticker.next, 50);
+    }
 }
