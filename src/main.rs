@@ -110,8 +110,8 @@ fn print_usage() {
 usage:
   {prog} head   [-n N] [FILE]
   {prog} sample [-n N] [--seed S] [FILE]
-  {prog} stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [--progress] [FILE]
-  {prog} schema [--depth N] [--min-rate R] [--json] [--progress] [FILE]
+  {prog} stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [--progress] [--fail-on-invalid] [FILE]
+  {prog} schema [--depth N] [--min-rate R] [--json] [--progress] [--fail-on-invalid] [FILE]
 
 FILE defaults to '-', meaning standard input. Every command reads the input
 exactly once and keeps a bounded amount of state, so it is safe to point at a
@@ -139,6 +139,8 @@ options:
   --json          machine readable output (stats, schema)
   --progress      print a line count to stderr every {progress_interval}
                   lines (stats, schema)
+  --fail-on-invalid  exit with status 1 if any line failed to parse
+                  (stats, schema), after printing the report
   -h, --help      this text
   -V, --version   version
 
@@ -270,6 +272,7 @@ fn cmd_stats(args: &[String]) -> Result<(), Fail> {
     let mut top = 10usize;
     let mut min_count = 0u64;
     let mut progress = false;
+    let mut fail_on_invalid = false;
     let mut file: Option<String> = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -290,6 +293,7 @@ fn cmd_stats(args: &[String]) -> Result<(), Fail> {
             }
             "--json" => as_json = true,
             "--progress" => progress = true,
+            "--fail-on-invalid" => fail_on_invalid = true,
             other if is_flag(other) => return Err(unknown_flag(other)),
             other => take_positional(&mut file, other)?,
         }
@@ -312,7 +316,14 @@ fn cmd_stats(args: &[String]) -> Result<(), Fail> {
     } else {
         stats.report_text(&path, top, min_count)
     };
-    emit(&report)
+    emit(&report)?;
+    if fail_on_invalid && stats.invalid > 0 {
+        return Err(Fail::Message(format!(
+            "{} invalid line(s) found (--fail-on-invalid)",
+            stats.invalid
+        )));
+    }
+    Ok(())
 }
 
 fn cmd_schema(args: &[String]) -> Result<(), Fail> {
@@ -320,6 +331,7 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
     let mut min_rate = 0.0f64;
     let mut as_json = false;
     let mut progress = false;
+    let mut fail_on_invalid = false;
     let mut file: Option<String> = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -333,6 +345,7 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
             }
             "--json" => as_json = true,
             "--progress" => progress = true,
+            "--fail-on-invalid" => fail_on_invalid = true,
             other if is_flag(other) => return Err(unknown_flag(other)),
             other => take_positional(&mut file, other)?,
         }
@@ -365,7 +378,14 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
     } else {
         schema.report_text(min_rate)
     };
-    emit(&report)
+    emit(&report)?;
+    if fail_on_invalid && schema.skipped > 0 {
+        return Err(Fail::Message(format!(
+            "{} unparseable line(s) skipped (--fail-on-invalid)",
+            schema.skipped
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -149,8 +149,8 @@ $ zstdcat shard-0000.jsonl.zst | jsonl-peek stats --json - | jq .line_length
 ```
 jsonl-peek head   [-n N] [FILE]
 jsonl-peek sample [-n N] [--seed S] [FILE]
-jsonl-peek stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [--progress] [FILE]
-jsonl-peek schema [--depth N] [--min-rate R] [--json] [--progress] [FILE]
+jsonl-peek stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [--progress] [--fail-on-invalid] [FILE]
+jsonl-peek schema [--depth N] [--min-rate R] [--json] [--progress] [--fail-on-invalid] [FILE]
 ```
 
 | Option | Commands | Meaning |
@@ -165,9 +165,16 @@ jsonl-peek schema [--depth N] [--min-rate R] [--json] [--progress] [FILE]
 | `--min-rate R` | schema | hide paths present in fewer than R of the records |
 | `--json` | stats, schema | machine-readable output |
 | `--progress` | stats, schema | print a line count to stderr every 10,000 lines |
+| `--fail-on-invalid` | stats, schema | exit 1 if any line failed to parse, after printing the report |
 
 Exit status is `0` on success, `1` on a runtime error (missing file, unreadable
-input) and `2` on a usage error.
+input) and `2` on a usage error. Pass `--fail-on-invalid` to also turn broken
+input into a nonzero exit, which is the thing a CI step actually wants to
+check rather than grepping the report for `invalid 0`:
+
+```sh
+$ jsonl-peek stats --fail-on-invalid shard.jsonl && echo "shard is clean"
+```
 
 ### Field path syntax
 

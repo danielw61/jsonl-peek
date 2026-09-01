@@ -275,6 +275,34 @@ fn usage_errors_exit_with_two() {
 }
 
 #[test]
+fn stats_fail_on_invalid_exits_one_but_still_prints_the_report() {
+    let fixture = Fixture::new("failinvalid", FIXTURE);
+    let path = fixture.path().to_str().unwrap();
+
+    let clean = run(&["stats", path]);
+    assert!(clean.status.success(), "no --fail-on-invalid, no failure");
+
+    let out = run(&["stats", "--fail-on-invalid", path]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stdout_of(&out).contains("invalid 1"), "report is still printed");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("1 invalid line"));
+}
+
+#[test]
+fn schema_fail_on_invalid_exits_one_but_still_prints_the_report() {
+    let fixture = Fixture::new("schemafailinvalid", FIXTURE);
+    let path = fixture.path().to_str().unwrap();
+
+    let clean = run(&["schema", path]);
+    assert!(clean.status.success(), "no --fail-on-invalid, no failure");
+
+    let out = run(&["schema", "--fail-on-invalid", path]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stdout_of(&out).contains("1 unparseable lines skipped"), "report is still printed");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("1 unparseable line"));
+}
+
+#[test]
 fn missing_files_exit_with_one() {
     let out = run(&["stats", "/definitely/not/here.jsonl"]);
     assert_eq!(out.status.code(), Some(1));
