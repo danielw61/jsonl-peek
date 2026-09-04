@@ -266,16 +266,67 @@ fn cmd_sample(args: &[String]) -> Result<(), Fail> {
     Ok(())
 }
 
+/// `--json`, `--progress`, `--fail-on-invalid` and the trailing file argument
+/// are identical across `stats` and `schema`; parsed together so each command
+/// only has to handle the flags it does not share.
+struct CommonFlags {
+    as_json: bool,
+    progress: bool,
+    fail_on_invalid: bool,
+    file: Option<String>,
+}
+
+impl CommonFlags {
+    fn new() -> Self {
+        CommonFlags {
+            as_json: false,
+            progress: false,
+            fail_on_invalid: false,
+            file: None,
+        }
+    }
+
+    /// Consumes `arg` if it is one of the shared flags. Callers should try
+    /// this before matching their own flags and before falling back to
+    /// `take_positional`.
+    fn try_take(&mut self, arg: &str) -> bool {
+        match arg {
+            "--json" => self.as_json = true,
+            "--progress" => self.progress = true,
+            "--fail-on-invalid" => self.fail_on_invalid = true,
+            _ => return false,
+        }
+        true
+    }
+
+    fn path(&self) -> &str {
+        self.file.as_deref().unwrap_or("-")
+    }
+
+    /// Turns `--fail-on-invalid` into an error, once the report has already
+    /// been printed. `message` describes what `count` refers to, e.g.
+    /// "invalid line(s) found".
+    fn check_invalid(&self, count: u64, message: &str) -> Result<(), Fail> {
+        if self.fail_on_invalid && count > 0 {
+            return Err(Fail::Message(format!(
+                "{} {} (--fail-on-invalid)",
+                count, message
+            )));
+        }
+        Ok(())
+    }
+}
+
 fn cmd_stats(args: &[String]) -> Result<(), Fail> {
     let mut options = StatsOptions::default();
-    let mut as_json = false;
+    let mut common = CommonFlags::new();
     let mut top = 10usize;
     let mut min_count = 0u64;
-    let mut progress = false;
-    let mut fail_on_invalid = false;
-    let mut file: Option<String> = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
+        if common.try_take(arg) {
+            continue;
+        }
         match arg.as_str() {
             "--field" | "-f" => {
                 let raw = need_value(iter.next(), "--field")?;
@@ -291,50 +342,40 @@ fn cmd_stats(args: &[String]) -> Result<(), Fail> {
                 options.max_issues =
                     parse_number(need_value(iter.next(), "--max-errors")?, "--max-errors")?;
             }
-            "--json" => as_json = true,
-            "--progress" => progress = true,
-            "--fail-on-invalid" => fail_on_invalid = true,
             other if is_flag(other) => return Err(unknown_flag(other)),
-            other => take_positional(&mut file, other)?,
+            other => take_positional(&mut common.file, other)?,
         }
     }
 
-    let path = file.unwrap_or_else(|| "-".to_string());
-    let mut reader = LineReader::new(open(&path)?);
+    let mut reader = LineReader::new(open(common.path())?);
     let mut stats = Stats::new(options);
     let mut ticker = Progress::new(PROGRESS_INTERVAL);
     while let Some(line) = reader.next_line()? {
         stats.observe(&line);
-        if progress {
+        if common.progress {
             ticker.tick(reader.lines_read(), reader.bytes_read());
         }
     }
-    let report = if as_json {
-        let mut text = stats.report_json(&path, min_count);
+    let report = if common.as_json {
+        let mut text = stats.report_json(common.path(), min_count);
         text.push('\n');
         text
     } else {
-        stats.report_text(&path, top, min_count)
+        stats.report_text(common.path(), top, min_count)
     };
     emit(&report)?;
-    if fail_on_invalid && stats.invalid > 0 {
-        return Err(Fail::Message(format!(
-            "{} invalid line(s) found (--fail-on-invalid)",
-            stats.invalid
-        )));
-    }
-    Ok(())
+    common.check_invalid(stats.invalid, "invalid line(s) found")
 }
 
 fn cmd_schema(args: &[String]) -> Result<(), Fail> {
     let mut options = SchemaOptions::default();
+    let mut common = CommonFlags::new();
     let mut min_rate = 0.0f64;
-    let mut as_json = false;
-    let mut progress = false;
-    let mut fail_on_invalid = false;
-    let mut file: Option<String> = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
+        if common.try_take(arg) {
+            continue;
+        }
         match arg.as_str() {
             "--depth" => options.max_depth = parse_number(need_value(iter.next(), "--depth")?, "--depth")?,
             "--min-rate" => {
@@ -343,19 +384,15 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
                     return Err(Fail::Usage("--min-rate must be between 0 and 1".to_string()));
                 }
             }
-            "--json" => as_json = true,
-            "--progress" => progress = true,
-            "--fail-on-invalid" => fail_on_invalid = true,
             other if is_flag(other) => return Err(unknown_flag(other)),
-            other => take_positional(&mut file, other)?,
+            other => take_positional(&mut common.file, other)?,
         }
     }
     if options.max_depth == 0 {
         return Err(Fail::Usage("--depth must be at least 1".to_string()));
     }
 
-    let path = file.unwrap_or_else(|| "-".to_string());
-    let mut reader = LineReader::new(open(&path)?);
+    let mut reader = LineReader::new(open(common.path())?);
     let mut schema = Schema::new(options);
     let mut ticker = Progress::new(PROGRESS_INTERVAL);
     while let Some(line) = reader.next_line()? {
@@ -366,12 +403,12 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
             Some(Ok(value)) => schema.observe(&value),
             _ => schema.observe_invalid(),
         }
-        if progress {
+        if common.progress {
             ticker.tick(reader.lines_read(), reader.bytes_read());
         }
     }
 
-    let report = if as_json {
+    let report = if common.as_json {
         let mut text = schema.report_json(min_rate);
         text.push('\n');
         text
@@ -379,13 +416,7 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
         schema.report_text(min_rate)
     };
     emit(&report)?;
-    if fail_on_invalid && schema.skipped > 0 {
-        return Err(Fail::Message(format!(
-            "{} unparseable line(s) skipped (--fail-on-invalid)",
-            schema.skipped
-        )));
-    }
-    Ok(())
+    common.check_invalid(schema.skipped, "unparseable line(s) skipped")
 }
 
 #[cfg(test)]
