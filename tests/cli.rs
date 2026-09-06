@@ -289,6 +289,21 @@ fn stats_fail_on_invalid_exits_one_but_still_prints_the_report() {
 }
 
 #[test]
+fn stats_quiet_suppresses_the_report_but_keeps_the_exit_code() {
+    let fixture = Fixture::new("quietstats", FIXTURE);
+    let path = fixture.path().to_str().unwrap();
+
+    let clean = run(&["stats", "--quiet", path]);
+    assert!(clean.status.success());
+    assert!(stdout_of(&clean).is_empty(), "--quiet must print nothing on success");
+
+    let out = run(&["stats", "--quiet", "--fail-on-invalid", path]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stdout_of(&out).is_empty(), "--quiet must print nothing even on failure");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("1 invalid line"));
+}
+
+#[test]
 fn schema_fail_on_invalid_exits_one_but_still_prints_the_report() {
     let fixture = Fixture::new("schemafailinvalid", FIXTURE);
     let path = fixture.path().to_str().unwrap();

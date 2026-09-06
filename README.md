@@ -149,8 +149,8 @@ $ zstdcat shard-0000.jsonl.zst | jsonl-peek stats --json - | jq .line_length
 ```
 jsonl-peek head   [-n N] [FILE]
 jsonl-peek sample [-n N] [--seed S] [FILE]
-jsonl-peek stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [--progress] [--fail-on-invalid] [FILE]
-jsonl-peek schema [--depth N] [--min-rate R] [--json] [--progress] [--fail-on-invalid] [FILE]
+jsonl-peek stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [--progress] [--fail-on-invalid] [--quiet] [FILE]
+jsonl-peek schema [--depth N] [--min-rate R] [--json] [--progress] [--fail-on-invalid] [--quiet] [FILE]
 ```
 
 | Option | Commands | Meaning |
@@ -166,6 +166,7 @@ jsonl-peek schema [--depth N] [--min-rate R] [--json] [--progress] [--fail-on-in
 | `--json` | stats, schema | machine-readable output |
 | `--progress` | stats, schema | print a line count to stderr every 10,000 lines |
 | `--fail-on-invalid` | stats, schema | exit 1 if any line failed to parse, after printing the report |
+| `--quiet` | stats, schema | print nothing on success; pair with `--fail-on-invalid` to signal only through the exit code |
 
 Exit status is `0` on success, `1` on a runtime error (missing file, unreadable
 input) and `2` on a usage error. Pass `--fail-on-invalid` to also turn broken
@@ -174,6 +175,13 @@ check rather than grepping the report for `invalid 0`:
 
 ```sh
 $ jsonl-peek stats --fail-on-invalid shard.jsonl && echo "shard is clean"
+```
+
+Add `--quiet` once the report itself is not the point, so a pipeline stage
+only sees the exit code:
+
+```sh
+$ jsonl-peek stats --quiet --fail-on-invalid shard.jsonl || echo "shard has broken lines"
 ```
 
 ### Field path syntax

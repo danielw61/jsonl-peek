@@ -110,8 +110,8 @@ fn print_usage() {
 usage:
   {prog} head   [-n N] [FILE]
   {prog} sample [-n N] [--seed S] [FILE]
-  {prog} stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [--progress] [--fail-on-invalid] [FILE]
-  {prog} schema [--depth N] [--min-rate R] [--json] [--progress] [--fail-on-invalid] [FILE]
+  {prog} stats  [--field PATH]... [--top N] [--min-count N] [--max-errors N] [--json] [--progress] [--fail-on-invalid] [--quiet] [FILE]
+  {prog} schema [--depth N] [--min-rate R] [--json] [--progress] [--fail-on-invalid] [--quiet] [FILE]
 
 FILE defaults to '-', meaning standard input. Every command reads the input
 exactly once and keeps a bounded amount of state, so it is safe to point at a
@@ -141,6 +141,9 @@ options:
                   lines (stats, schema)
   --fail-on-invalid  exit with status 1 if any line failed to parse
                   (stats, schema), after printing the report
+  --quiet         suppress the report, print nothing on success
+                  (stats, schema); combine with --fail-on-invalid to
+                  signal only through the exit code
   -h, --help      this text
   -V, --version   version
 
@@ -266,13 +269,14 @@ fn cmd_sample(args: &[String]) -> Result<(), Fail> {
     Ok(())
 }
 
-/// `--json`, `--progress`, `--fail-on-invalid` and the trailing file argument
-/// are identical across `stats` and `schema`; parsed together so each command
-/// only has to handle the flags it does not share.
+/// `--json`, `--progress`, `--fail-on-invalid`, `--quiet` and the trailing
+/// file argument are identical across `stats` and `schema`; parsed together
+/// so each command only has to handle the flags it does not share.
 struct CommonFlags {
     as_json: bool,
     progress: bool,
     fail_on_invalid: bool,
+    quiet: bool,
     file: Option<String>,
 }
 
@@ -282,6 +286,7 @@ impl CommonFlags {
             as_json: false,
             progress: false,
             fail_on_invalid: false,
+            quiet: false,
             file: None,
         }
     }
@@ -294,6 +299,7 @@ impl CommonFlags {
             "--json" => self.as_json = true,
             "--progress" => self.progress = true,
             "--fail-on-invalid" => self.fail_on_invalid = true,
+            "--quiet" => self.quiet = true,
             _ => return false,
         }
         true
@@ -356,14 +362,16 @@ fn cmd_stats(args: &[String]) -> Result<(), Fail> {
             ticker.tick(reader.lines_read(), reader.bytes_read());
         }
     }
-    let report = if common.as_json {
-        let mut text = stats.report_json(common.path(), min_count);
-        text.push('\n');
-        text
-    } else {
-        stats.report_text(common.path(), top, min_count)
-    };
-    emit(&report)?;
+    if !common.quiet {
+        let report = if common.as_json {
+            let mut text = stats.report_json(common.path(), min_count);
+            text.push('\n');
+            text
+        } else {
+            stats.report_text(common.path(), top, min_count)
+        };
+        emit(&report)?;
+    }
     common.check_invalid(stats.invalid, "invalid line(s) found")
 }
 
@@ -408,14 +416,16 @@ fn cmd_schema(args: &[String]) -> Result<(), Fail> {
         }
     }
 
-    let report = if common.as_json {
-        let mut text = schema.report_json(min_rate);
-        text.push('\n');
-        text
-    } else {
-        schema.report_text(min_rate)
-    };
-    emit(&report)?;
+    if !common.quiet {
+        let report = if common.as_json {
+            let mut text = schema.report_json(min_rate);
+            text.push('\n');
+            text
+        } else {
+            schema.report_text(min_rate)
+        };
+        emit(&report)?;
+    }
     common.check_invalid(schema.skipped, "unparseable line(s) skipped")
 }
 
