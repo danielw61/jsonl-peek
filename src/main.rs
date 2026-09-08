@@ -364,7 +364,7 @@ fn cmd_stats(args: &[String]) -> Result<(), Fail> {
     }
     if !common.quiet {
         let report = if common.as_json {
-            let mut text = stats.report_json(common.path(), min_count);
+            let mut text = stats.report_json(common.path(), top, min_count);
             text.push('\n');
             text
         } else {
