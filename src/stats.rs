@@ -353,7 +353,7 @@ impl Stats {
             }
         }
 
-        if !self.issues.is_empty() {
+        if self.invalid > 0 {
             out.push_str(&format!(
                 "\ninvalid lines ({} total, showing {})\n",
                 thousands(self.invalid),
@@ -759,6 +759,21 @@ mod tests {
         let s = Stats::from_reader(input.as_bytes(), options).unwrap();
         assert_eq!(s.invalid, 25);
         assert_eq!(s.issues.len(), 3);
+    }
+
+    #[test]
+    fn max_errors_zero_still_headers_the_invalid_count() {
+        let input = "oops\n".repeat(5);
+        let options = StatsOptions {
+            max_issues: 0,
+            ..StatsOptions::default()
+        };
+        let s = Stats::from_reader(input.as_bytes(), options).unwrap();
+        assert_eq!(s.invalid, 5);
+        assert!(s.issues.is_empty());
+
+        let report = s.report_text("x", 5, 0);
+        assert!(report.contains("invalid lines (5 total, showing 0)"));
     }
 
     #[test]
