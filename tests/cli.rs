@@ -118,6 +118,18 @@ fn stats_min_count_hides_rare_field_values() {
 }
 
 #[test]
+fn stats_max_errors_zero_still_headers_the_invalid_count() {
+    let fixture = Fixture::new("maxerrorszero", FIXTURE);
+    let path = fixture.path().to_str().unwrap();
+
+    let out = run(&["stats", "--max-errors", "0", path]);
+    assert!(out.status.success());
+    let text = stdout_of(&out);
+    assert!(text.contains("invalid lines (1 total, showing 0)"), "report:\n{}", text);
+    assert!(!text.contains("line 7 col 28"), "report:\n{}", text);
+}
+
+#[test]
 fn stats_progress_reports_to_stderr_and_leaves_stdout_untouched() {
     let mut contents = String::new();
     for i in 0..25_000 {

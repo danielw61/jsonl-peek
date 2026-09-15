@@ -160,7 +160,7 @@ jsonl-peek schema [--depth N] [--min-rate R] [--json] [--progress] [--fail-on-in
 | `--field PATH` | stats | profile a field; repeatable |
 | `--top N` | stats | distinct values listed per field (default 10) |
 | `--min-count N` | stats | hide field values seen fewer than N times (default 0) |
-| `--max-errors N` | stats | broken lines shown (default 10) |
+| `--max-errors N` | stats | broken lines shown (default 10); `0` still reports the total invalid count, just none of them |
 | `--depth N` | schema | levels to descend (default 3) |
 | `--min-rate R` | schema | hide paths present in fewer than R of the records |
 | `--json` | stats, schema | machine-readable output |
